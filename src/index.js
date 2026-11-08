@@ -26,6 +26,8 @@ const shopLib = require('./shop');
 const avatarLib = require('./avatarframe');
 const backgroundsLib = require('./backgrounds');
 const storefrontLib = require('./storefront');
+const bucksMod = require('./bucksbridge');
+const bucksBridge = bucksMod.bridge; // Swamp Bucks Bridge (off unless SWAMP_BUCKS_API_BASE + SWAMP_BUCKS_SECRET are set)
 
 const store = new Store();
 const tz = config.timezone;
@@ -193,7 +195,7 @@ async function maybeAwardBoosterPack(member) {
   if (!lootLib.boosterPackEligible(rec, true, new Date(), tz)) return false;
   rec.lastBoostPackMonth = lootLib.monthKeyInHalifax(new Date(), tz);
   const monthName = lootLib.monthNameInHalifax(new Date(), tz);
-  rec.swampBucks += BOOSTER_PACK.bucks;
+  await bucksBridge.adjust(rec, BOOSTER_PACK.bucks, 'booster pack');
   lootLib.addItem(rec, lootLib.RAID_PASS, BOOSTER_PACK.raidPasses);
   const items = lootLib.rollLootMany(BOOSTER_PACK.lootRolls);
   for (const name of items) lootLib.addItem(rec, name);
@@ -268,7 +270,7 @@ async function awardXp(userId, baseXp, opts = {}) {
   let bucksGained = 0;
   const levelsGained = [];
   for (let l = before + 1; l <= after; l++) { bucksGained += xpLib.bucksForLevel(l); levelsGained.push(l); }
-  if (bucksGained) rec.swampBucks += bucksGained;
+  if (bucksGained) await bucksBridge.adjust(rec, bucksGained, 'level up');
   // v2: one loot roll per level gained (premium members roll one extra), and
   // the level-5 generated cosmetic title mints itself when first reached.
   let lootGained = [];
@@ -394,6 +396,16 @@ async function autoRegisterCommands() {
 client.once(Events.ClientReady, async (c) => {
   console.log(`[crocodile-king] online as ${c.user.tag}`);
   c.user.setActivity('the swamp gate | /profile', { type: ActivityType.Watching });
+  // Profile banner: if his profile has none, set it from the bundled banner
+  // art (assets/profile-banner.jpg, the King on his throne). One attempt per
+  // boot, failures only logged - a missing banner must never stop the King.
+  if (!c.user.banner) {
+    try {
+      const path = require('path');
+      await c.user.setBanner(path.join(__dirname, '..', 'assets', 'profile-banner.jpg'));
+      console.log('[crocodile-king] profile banner set from assets/profile-banner.jpg');
+    } catch (e) { console.warn('[crocodile-king] profile banner set failed:', e.message); }
+  }
   await autoRegisterCommands();
   if (!config.verifiedRoleId) warn('verification tracking (role mode)', 'VERIFIED_ROLE_ID');
   if (!config.modChannelId) warn('mod nudges', 'MOD_CHANNEL_ID');
@@ -463,7 +475,7 @@ async function markVerified(member) {
   rec.verifiedAt = Date.now();
   store.save();
   await awardXp(member.id, 50, { member, channelId: config.welcomeChannelId }); // Welcome Pack XP
-  rec.swampBucks += 25;
+  await bucksBridge.adjust(rec, 25, 'welcome pack');
   lootLib.addItem(rec, lootLib.RAID_PASS, 1); // Welcome Pack now also carries 1 Raid Pass
   store.save();
   const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
@@ -579,7 +591,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       for (const pid of ev.participants) {
         const r = await awardXp(pid, 75, { channelId });
         const pRec = store.user(pid);
-        pRec.swampBucks += 30;
+        await bucksBridge.adjust(pRec, 30, 'event finish');
         addRep(pRec, factionsLib.REP_ACTIONS.event); // +2 rep for showing up and swinging
         const newTitle = titlesLib.unlockAchievement(pRec, 'firstEvent');
         // 1 loot roll for taking part (premium members roll one extra, in grantLoot)
@@ -692,6 +704,7 @@ function profileEmbed(user, rec, member) {
  * awardXp with a flat x1 multiplier object - purchases are never bonused). */
 async function storeBuyText(interaction, rec, itemId) {
   ensureActionPoints(rec, interaction.member); // settle today's points before a tonic reads them
+  const bucksBefore = shopLib.balanceOf(rec); // Swamp Bucks Bridge: net-spend baseline
   const premium = isPremium(interaction.member, rec);
   const r = shopLib.buy(rec, itemId, {
     now: Date.now(),
@@ -700,6 +713,12 @@ async function storeBuyText(interaction, rec, itemId) {
     actionCap: premium ? ACTION_POINTS_PREMIUM : ACTION_POINTS_BASE,
   });
   if (!r.ok) return { ok: false, text: `🛒 ${r.reason}\n💰 Your balance: **${shopLib.balanceOf(rec)} Swamp Bucks**.` };
+  // Swamp Bucks Bridge: shop.js moved the local mirror synchronously;
+  // post just the net spend so a linked member's website book matches.
+  // (The XP Feast path below grants XP through awardXp, whose own level
+  // up Bucks go through the bridge separately - never counted here,
+  // because the baseline was captured before the purchase.)
+  await bucksBridge.settleDelta(rec, bucksBefore, 'store buy');
   if (r.xpToGrant) {
     const xr = await awardXp(interaction.user.id, r.xpToGrant, {
       member: interaction.member, channelId: interaction.channelId,
@@ -758,7 +777,9 @@ async function handleStorefrontComponent(interaction, parsed) {
     return;
   }
   if (parsed.action === 'sell') {
+    const bucksBefore = shopLib.balanceOf(rec);
     const r = storeSellText(rec, parsed.arg);
+    if (r.ok) { await bucksBridge.settleDelta(rec, bucksBefore, 'store sell'); store.save(); }
     await interaction.reply({ content: r.text, ephemeral: true });
   }
 }
@@ -907,6 +928,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   const userId = interaction.user.id;
   const rec = store.user(userId);
+  // Swamp Bucks Bridge: for a linked member (or one whose /link code was
+  // just redeemed on the website) the website book is the true one, so
+  // refresh the local mirror before any command reads or moves Bucks.
+  // Bridge off or unlinked: returns instantly, nothing changes.
+  if (bucksBridge.enabled && (rec.websiteUserId || rec.pendingLinkAt)) {
+    try { const sync = await bucksBridge.syncRecord(rec); if (sync.changed) store.save(); } catch { /* the local book carries on */ }
+  }
   if (!rec.joinedAt && interaction.member && interaction.member.joinedAt) rec.joinedAt = interaction.member.joinedAt.getTime();
   const isAdmin = interaction.memberPermissions && interaction.memberPermissions.has(PermissionFlagsBits.Administrator);
   const isMod = isAdmin
@@ -993,7 +1021,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       rec.lastDailyKey = today;
       ensureActionPoints(rec, interaction.member); // a fresh /daily also means a fresh Halifax day of points
       const r = await awardXp(userId, 50, { member: interaction.member, channelId: interaction.channelId });
-      rec.swampBucks += 20;
+      await bucksBridge.adjust(rec, 20, 'daily');
       const items = grantLoot(rec, interaction.member, 1); // 1 loot roll with every /daily (premium: +1 extra)
       let extras = `\n🎁 **Daily loot:** ${lootText(items)}`;
       if (rec.streak % 7 === 0) {
@@ -1008,6 +1036,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply(`☀️ Daily claimed: +${r.gained} XP and +20 Swamp Bucks. Streak: **${rec.streak} day(s)**${rec.streak >= 7 ? ' - your +20% streak bonus is LIVE.' : ` - ${7 - rec.streak} more day(s) to the streak bonus.`}${streakRes.shieldUsed ? `\n🛡️ **Streak Shield spent:** you missed a day, and the shield cracked so your streak didn't. ${shopLib.countConsumable(rec, 'streak-shield')} shield(s) left in your pocket.` : ''}${extras}`);
     }
 
+    else if (cmd === 'link') {
+      if (!bucksBridge.enabled) {
+        await interaction.reply({ content: '🔗 Swampology linking is not switched on yet. Your Swamp Bucks live right here in the server for now, safe in the King\'s book. The moment the bridge opens, /link will tie them to your Swampology profile.', ephemeral: true });
+        return;
+      }
+      if (rec.websiteUserId) {
+        await interaction.reply({ content: `🔗 Already linked. Your Discord and your Swampology profile share one Swamp Bucks balance: **${shopLib.balanceOf(rec)} Bucks**, kept in step by the bridge. Earn or spend on either side and it is the same pile.`, ephemeral: true });
+        return;
+      }
+      await interaction.deferReply({ ephemeral: true });
+      const issued = bucksMod.issueLinkCode(store.data, rec, Date.now());
+      const reg = await bucksBridge.registerLinkCode(userId, issued.code, issued.expiresAt, shopLib.balanceOf(rec));
+      if (!reg.ok) {
+        delete store.data.linkCodes[issued.code];
+        rec.pendingLinkCode = null;
+        rec.pendingLinkAt = 0;
+        store.save();
+        await interaction.editReply('🔗 The King tried to send your code to Swampology and the water was too rough just now. Nothing was linked and nothing moved. Wait a minute and run /link again.');
+        return;
+      }
+      store.save();
+      await interaction.editReply([
+        `🔗 **Your Swampology link code is: ${issued.code}**`,
+        '',
+        'What to do with it:',
+        '1. Sign in at Swampology.com and open your profile.',
+        '2. Find the Swamp Bucks linking spot and type the code in.',
+        '3. Come back here and run any command. The bridge spots the link and your balance follows you.',
+        '',
+        `The code lives for 15 minutes and works once. Your current balance of **${shopLib.balanceOf(rec)} Swamp Bucks** rides over with it, every last Buck. After linking, your Bucks in Discord and on Swampology are one and the same pile. Bucks stay play money: they cannot be bought, sold or cashed out, here or there.`,
+      ].join('\n'));
+    }
+
     else if (cmd === 'quest') {
       const sub = interaction.options.getSubcommand();
       const quest = resetQuestIfNewDay(rec);
@@ -1020,7 +1081,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         rec.questClaimedKey = rec.questDayKey;
         const r = await awardXp(userId, quest.rewardXp, { member: interaction.member, channelId: interaction.channelId });
         const dd = shopLib.applyDoubleDown(rec, quest.rewardBucks); // Double-Down: Bucks only, auto-spent
-        rec.swampBucks += dd.bucks;
+        await bucksBridge.adjust(rec, dd.bucks, 'daily quest claim');
         addRep(rec, factionsLib.REP_ACTIONS.questClaim); // +5 rep for claiming the daily quest
         const newTitle = titlesLib.unlockAchievement(rec, 'firstQuest');
         store.save();
@@ -1037,7 +1098,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const check = factionsLib.checkFactionChange(rec, target.id);
         if (!check.ok) { await interaction.reply({ content: `The King shakes his head: ${check.reason}.`, ephemeral: true }); return; }
         const old = factionsLib.factionById(rec.faction);
-        if (check.cost) rec.swampBucks -= check.cost;
+        if (check.cost) await bucksBridge.adjust(rec, 0 - check.cost, 'faction switch');
         rec.faction = target.id;
         if (!rec.factionJoinedAt) rec.factionJoinedAt = Date.now();
         rec.factionLastSwitchAt = Date.now();
@@ -1136,7 +1197,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         rec.sideQuest = null;
         const r = await awardXp(userId, q.rewardXp, { member: interaction.member, channelId: interaction.channelId });
         const dd = shopLib.applyDoubleDown(rec, q.rewardBucks); // Double-Down: Bucks only, auto-spent
-        rec.swampBucks += dd.bucks;
+        await bucksBridge.adjust(rec, dd.bucks, 'side quest claim');
         addRep(rec, factionsLib.REP_ACTIONS.sideQuest);
         let lootLine = '';
         if (Math.random() < 0.25) { const items = grantLoot(rec, interaction.member, 1); lootLine = `\n🎁 **Bonus loot (the 1-in-4 smiled):** ${lootText(items)}`; }
@@ -1167,7 +1228,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const r = await storeBuyText(interaction, rec, interaction.options.getString('item'));
         await interaction.reply(r.ok ? r.text : { content: r.text, ephemeral: true });
       } else if (sub === 'sell') {
+        const bucksBefore = shopLib.balanceOf(rec);
         const r = storeSellText(rec, interaction.options.getString('item'));
+        if (r.ok) { await bucksBridge.settleDelta(rec, bucksBefore, 'store sell'); store.save(); }
         await interaction.reply(r.ok ? r.text : { content: r.text, ephemeral: true });
       }
     }
@@ -1291,7 +1354,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const tRec = store.user(target.id);
         let tMember = interaction.guild ? await interaction.guild.members.fetch(target.id).catch(() => null) : null;
         const r = await awardXp(target.id, sq.rewardXp, { member: tMember, channelId: interaction.channelId });
-        tRec.swampBucks += sq.rewardBucks;
+        await bucksBridge.adjust(tRec, sq.rewardBucks, 'sponsor quest');
         addRep(tRec, factionsLib.REP_ACTIONS.sponsorQuest); // +4 rep for a sponsor quest completion
         const newTitle = titlesLib.unlockAchievement(tRec, 'firstSponsor');
         // Optional winner role (best-effort: a bad role ID must never fail the award)
