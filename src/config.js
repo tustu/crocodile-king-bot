@@ -58,6 +58,11 @@ const config = {
   verifyInstructions: env('VERIFY_INSTRUCTIONS',
     'head to the verify channel and follow the pinned steps - one step, takes a minute'),
   autoEvents: env('AUTO_EVENTS', 'false').toLowerCase() === 'true',
+  // Swamp Bucks Bridge (src/bucksbridge.js): BOTH must be set or the
+  // bridge stays off and balances live purely in store.json, as before.
+  // The secret must match SWAMP_BUCKS_SECRET on the website, exactly.
+  bucksApiBase: env('SWAMP_BUCKS_API_BASE').replace(/\/+$/, ''),
+  bucksSecret: env('SWAMP_BUCKS_SECRET'),
   levelRoleIds: parseLevelRoleIds(),
   factionRoleIds: parseFactionRoleIds(),
 };
