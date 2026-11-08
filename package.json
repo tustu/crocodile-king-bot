@@ -1,1 +1,21 @@
-{"dependencies":{"discord.js":"^14.16.3","jimp":"^0.22.12","undici":"^6.29.1"},"description":"Crocodile King - AI host, referee and engagement engine for THE SWAMP Discord server","engines":{"node":">=20"},"main":"src/index.js","name":"swamp-host-bot-crocodile-king","scripts":{"check":"node --check src/index.js && node --check src/xp.js && node --check src/store.js && node --check src/lines.js && node --check src/content.js && node --check src/config.js && node --check src/legal.js && node --check src/factions.js && node --check src/loot.js && node --check src/titles.js && node --check src/questgen.js && node --check src/shop.js && node --check src/avatarframe.js && node --check src/backgrounds.js && node --check src/storefront.js && node --check src/setup.js && node --check src/deploy-commands.js","deploy-commands":"node src/deploy-commands.js","start":"node src/index.js","test":"node --test test/*.test.js"},"type":"commonjs","version":"2.2.5"}
+{
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "jimp": "^0.22.12",
+    "undici": "^6.29.1"
+  },
+  "description": "Crocodile King - AI host, referee and engagement engine for THE SWAMP Discord server",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "name": "swamp-host-bot-crocodile-king",
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/xp.js && node --check src/store.js && node --check src/lines.js && node --check src/content.js && node --check src/config.js && node --check src/legal.js && node --check src/factions.js && node --check src/loot.js && node --check src/titles.js && node --check src/questgen.js && node --check src/shop.js && node --check src/avatarframe.js && node --check src/backgrounds.js && node --check src/storefront.js && node --check src/setup.js && node --check src/deploy-commands.js && node --check src/bucksbridge.js",
+    "deploy-commands": "node src/deploy-commands.js",
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "type": "commonjs",
+  "version": "2.3.0"
+}
