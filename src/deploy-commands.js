@@ -30,6 +30,7 @@ function buildCommands() {
   new SlashCommandBuilder().setName('bonus').setDescription('Show a member\'s current XP bonus breakdown')
     .addUserOption(o => o.setName('member').setDescription('Whose bonuses (default: you)')),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily XP + Swamp Bucks and build your streak'),
+  new SlashCommandBuilder().setName('link').setDescription('Link your Discord to your Swampology profile so your Swamp Bucks match on both'),
   new SlashCommandBuilder().setName('quest').setDescription('Daily quest of THE SWAMP')
     .addSubcommand(s => s.setName('show').setDescription('Show today\'s quest and your progress'))
     .addSubcommand(s => s.setName('claim').setDescription('Claim today\'s quest reward when finished')),
