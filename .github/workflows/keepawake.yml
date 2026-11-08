@@ -1,0 +1,13 @@
+name: keep-awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the King
+        run: curl -fsS https://crocodile-king.onrender.com/health || true
