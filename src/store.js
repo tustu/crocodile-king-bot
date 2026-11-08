@@ -16,6 +16,7 @@ function blankStore() {
     config: blankHomeConfig(), // /setup wiring (channels/roles) - src/setup.js owns the shape
     users: {},          // userId -> user record (see blankUser)
     sponsorQuests: [],  // { id, title, sponsor, description, rewardXp, rewardBucks, roleId, keys:[{key, used, awardedTo}], createdAt, active, awards:[{userId, at, roleGranted, keyAwarded}] }
+    linkCodes: {},      // Swamp Bucks Bridge: code -> { discordId, seedBucks, expiresAt, createdAt } (see src/bucksbridge.js; codes also live on the website once pushed)
     factions: { weekly: {}, allTime: {} }, // weekly: { '2026-W45': { factionName: baseXp } }, allTime: { factionName: baseXp }
     channelRaidLastAt: {}, // channelId -> ms epoch of last member-triggered /raid (30 min cooldown)
     createdAt: new Date().toISOString(),
@@ -62,6 +63,11 @@ function blankUser(userId) {
     backgrounds: [],           // profile background ids owned (see backgrounds.js) - permanent
     equippedBackground: null,  // background id shown on the /profile card (newest owned)
     consumables: {},           // Swamp Specials counts: 'streak-shield' | 'double-down' | 'event-lure' -> count
+    // --- Swamp Bucks Bridge (src/bucksbridge.js) ---
+    websiteUserId: null,       // Swampology account id once /link lands; null = local book only
+    bucksOutbox: [],           // signed changes queued while the website was unreachable: { delta, reason, idempotencyKey, at }
+    pendingLinkCode: null,     // last /link code issued, while it can still be redeemed
+    pendingLinkAt: 0,          // ms epoch the pending code was issued
   };
 }
 
@@ -81,6 +87,7 @@ class Store {
         if (!this.data.factions.weekly) this.data.factions.weekly = {};
         if (!this.data.factions.allTime) this.data.factions.allTime = {};
         if (!this.data.channelRaidLastAt) this.data.channelRaidLastAt = {};
+        if (!this.data.linkCodes || typeof this.data.linkCodes !== 'object') this.data.linkCodes = {};
         // v2.2: backfill/normalize the stored /setup config for older stores
         this.data.config = mergeHomeConfig(this.data.config, {});
       }
@@ -146,6 +153,7 @@ class Store {
     if (!Array.isArray(u.frames)) u.frames = [];
     if (!Array.isArray(u.backgrounds)) u.backgrounds = [];
     if (!u.consumables || typeof u.consumables !== 'object') u.consumables = {};
+    if (!Array.isArray(u.bucksOutbox)) u.bucksOutbox = [];
     return u;
   }
 }
