@@ -207,10 +207,9 @@ async function maybeAwardBoosterPack(member) {
   const chId = config.announceChannelId || config.kingChannelId || config.questChannelId;
   const ch = chId ? await fetchChannel(chId, 'ANNOUNCE_CHANNEL_ID') : null;
   if (ch && ch.isTextBased()) await ch.send(packText).catch(() => {});
-  // DM attempt - closed DMs must never break the pack or the caller
-  try {
-    await member.send(`🚀 Your **${monthName} Booster Pack** for boosting THE SWAMP just landed: +${BOOSTER_PACK.bucks} Swamp Bucks, +1 Raid Pass, loot (${lootText(items)}) and +${BOOSTER_PACK.rep} Rep.${newTitle ? ` Plus a cosmetic title: **${newTitle}**.` : ''} The Crocodile King thanks you for carrying the swamp.`);
-  } catch { /* DMs closed - the public announcement already landed */ }
+  // NO DMS, EVER (owner rule, 2026-11-08): the King lives in the server only.
+  // He never messages members privately - the pack is announced in the
+  // server above and shows on /profile. There is no DM code path in this bot.
   return true;
 }
 
@@ -1036,6 +1035,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply(`☀️ Daily claimed: +${r.gained} XP and +20 Swamp Bucks. Streak: **${rec.streak} day(s)**${rec.streak >= 7 ? ' - your +20% streak bonus is LIVE.' : ` - ${7 - rec.streak} more day(s) to the streak bonus.`}${streakRes.shieldUsed ? `\n🛡️ **Streak Shield spent:** you missed a day, and the shield cracked so your streak didn't. ${shopLib.countConsumable(rec, 'streak-shield')} shield(s) left in your pocket.` : ''}${extras}`);
     }
 
+    else if (cmd === 'prize') {
+      // Prize keys wait on the member's own record (never DM'd, server only
+      // rule). Only the member sees this ephemeral reply.
+      const keys = Array.isArray(rec.pendingKeys) ? rec.pendingKeys : [];
+      if (!keys.length) {
+        await interaction.reply({ content: '🔑 No prize keys are waiting for you right now. Win a sponsored quest and your key will be held here, where only you can see it.', ephemeral: true });
+        return;
+      }
+      const list = keys.map(k => `• **${k.title}** (courtesy of ${k.sponsor}): \`${k.key}\``).join('\n');
+      await interaction.reply({ content: `🔑 **Your prize keys** — this reply is visible only to you:\n${list}\nKeep them somewhere safe.`, ephemeral: true });
+    }
+
     else if (cmd === 'link') {
       if (!bucksBridge.enabled) {
         await interaction.reply({ content: '🔗 Swampology linking is not switched on yet. Your Swamp Bucks live right here in the server for now, safe in the King\'s book. The moment the bridge opens, /link will tie them to your Swampology profile.', ephemeral: true });
@@ -1345,7 +1356,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         sq.keys.push({ key: interaction.options.getString('key'), used: false, awardedTo: null });
         store.save();
         // Confirmation is counts only - the key itself is never echoed back anywhere.
-        await interaction.reply({ content: `🔑 Key stored for "${sq.title}". Pool now holds ${sq.keys.filter(k => !k.used).length} unused key(s). It will only ever leave by DM to a winner.`, ephemeral: true });
+        await interaction.reply({ content: `🔑 Key stored for "${sq.title}". Pool now holds ${sq.keys.filter(k => !k.used).length} unused key(s). It will only ever be shown to its winner, by /prize, in a reply only they can see.`, ephemeral: true });
       } else if (sub === 'complete') {
         if (!isAdmin) { await interaction.reply({ content: 'Admins only.', ephemeral: true }); return; }
         const sq = store.data.sponsorQuests.find(q => q.id === activeSponsorQuestId && q.active) || store.data.sponsorQuests.filter(q => q.active).pop();
@@ -1362,24 +1373,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (sq.roleId && tMember) {
           try { await tMember.roles.add(sq.roleId); roleGranted = true; } catch (e) { console.warn('[crocodile-king] sponsor role grant failed:', e.message); }
         }
-        // Digital key: pop the next unused one, DM it to the winner only.
-        // If the DM fails the key stays in the pool unused and the admin gets told (never the key itself, in public).
+        // Digital key: pop the next unused one and hold it on the winner's
+        // record. NO DMS (owner rule, 2026-11-08): the winner views it with
+        // /prize, an ephemeral reply only they can see, inside the server.
+        // The key itself is never posted in a public channel.
         let keyAwarded = false;
         if (Array.isArray(sq.keys)) {
           const entry = sq.keys.find(k => !k.used);
           if (entry) {
-            try {
-              await target.send(`🔑 **Sponsored prize from ${sq.sponsor}** for completing "${sq.title}" in THE SWAMP.\nYour digital key: \`${entry.key}\`\nKeep it somewhere safe - the Crocodile King keeps no second copy on display.`);
-              entry.used = true; entry.awardedTo = target.id; keyAwarded = true;
-            } catch (e) {
-              const modCh = await fetchChannel(config.modChannelId, 'MOD_CHANNEL_ID');
-              if (modCh && modCh.isTextBased()) await modCh.send(`Mods: tried to DM a sponsor prize key to ${target.username} for "${sq.title}" but their DMs are closed. The key is still in the pool, unspent - arrange delivery another way, and never post it in a public channel.`).catch(() => {});
-            }
+            entry.used = true; entry.awardedTo = target.id;
+            if (!Array.isArray(tRec.pendingKeys)) tRec.pendingKeys = [];
+            tRec.pendingKeys.push({ title: sq.title, sponsor: sq.sponsor, key: entry.key, at: new Date().toISOString() });
+            keyAwarded = true;
           }
         }
         sq.awards.push({ userId: target.id, at: new Date().toISOString(), roleGranted, keyAwarded }); // ID + timestamp + award flags only, no private info, never the key
         store.save();
-        await interaction.reply(`**Sponsored** quest complete for <@${target.id}>: +${r.gained} XP, +${sq.rewardBucks} Swamp Bucks and +${factionsLib.REP_ACTIONS.sponsorQuest} Rep, courtesy of ${sq.sponsor}.${roleGranted ? ' Winner role granted.' : ''}${keyAwarded ? ' A digital prize key was delivered to them by DM.' : ''}${newTitle ? `\n✨ Cosmetic title unlocked for them: **${newTitle}**` : ''}`);
+        await interaction.reply(`**Sponsored** quest complete for <@${target.id}>: +${r.gained} XP, +${sq.rewardBucks} Swamp Bucks and +${factionsLib.REP_ACTIONS.sponsorQuest} Rep, courtesy of ${sq.sponsor}.${roleGranted ? ' Winner role granted.' : ''}${keyAwarded ? ' Their prize key is being held for them: it shows only to them when they run /prize.' : ''}${newTitle ? `\n✨ Cosmetic title unlocked for them: **${newTitle}**` : ''}`);
       } else if (sub === 'report') {
         if (!isAdmin) { await interaction.reply({ content: 'Admins only.', ephemeral: true }); return; }
         const month = new Date().toISOString().slice(0, 7);
