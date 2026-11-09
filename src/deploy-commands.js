@@ -31,6 +31,7 @@ function buildCommands() {
     .addUserOption(o => o.setName('member').setDescription('Whose bonuses (default: you)')),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily XP + Swamp Bucks and build your streak'),
   new SlashCommandBuilder().setName('link').setDescription('Link your Discord to your Swampology profile so your Swamp Bucks match on both'),
+  new SlashCommandBuilder().setName('prize').setDescription('See prize keys waiting for you - the reply shows only to you'),
   new SlashCommandBuilder().setName('quest').setDescription('Daily quest of THE SWAMP')
     .addSubcommand(s => s.setName('show').setDescription('Show today\'s quest and your progress'))
     .addSubcommand(s => s.setName('claim').setDescription('Claim today\'s quest reward when finished')),
@@ -85,9 +86,9 @@ function buildCommands() {
       .addIntegerOption(o => o.setName('rewardxp').setDescription('Reward XP (default 100)'))
       .addIntegerOption(o => o.setName('rewardbucks').setDescription('Reward Swamp Bucks (default 25)'))
       .addStringOption(o => o.setName('role_id').setDescription('Optional Discord role ID granted to winners')))
-    .addSubcommand(s => s.setName('addkey').setDescription('Store a sponsor digital prize key for the active quest (never printed, DM to winner only)')
+    .addSubcommand(s => s.setName('addkey').setDescription('Store a sponsor prize key (never printed; the winner claims it with /prize)')
       .addStringOption(o => o.setName('key').setDescription('The prize key / code').setRequired(true)))
-    .addSubcommand(s => s.setName('complete').setDescription('Award a member: XP, Bucks, Rep, winner role + DM key if set')
+    .addSubcommand(s => s.setName('complete').setDescription('Award a member: XP, Bucks, Rep, winner role + prize key held for /prize if set')
       .addUserOption(o => o.setName('member').setDescription('Member to award').setRequired(true)))
     .addSubcommand(s => s.setName('report').setDescription('Monthly sponsor report - counts only, no private info'))),
   new SlashCommandBuilder().setName('unverified').setDescription('Mods: list unverified members and how long they have waited'),
