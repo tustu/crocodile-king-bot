@@ -17,5 +17,5 @@
     "test": "node --test test/*.test.js"
   },
   "type": "commonjs",
-  "version": "2.3.0"
+  "version": "2.3.1"
 }
