@@ -68,6 +68,7 @@ function blankUser(userId) {
     bucksOutbox: [],           // signed changes queued while the website was unreachable: { delta, reason, idempotencyKey, at }
     pendingLinkCode: null,     // last /link code issued, while it can still be redeemed
     pendingLinkAt: 0,          // ms epoch the pending code was issued
+    pendingKeys: [],           // sponsor prize keys held for this member, viewed with /prize (never DM'd)
   };
 }
 
