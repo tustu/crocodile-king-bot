@@ -1454,6 +1454,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.channel.send(`🐊 **Crocodile King says:** ${text}`);
       await interaction.reply({ content: 'Said it. In character, obviously.', ephemeral: true });
     }
+
+    else if (cmd === 'welcomepost') {
+      if (!isAdmin) { await interaction.reply({ content: 'Admins hold the King\'s microphone.', ephemeral: true }); return; }
+      const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
+      if (!ch || !ch.isTextBased()) { await interaction.reply({ content: 'No welcome channel is assigned yet - set one in /setup first, then run this again.', ephemeral: true }); return; }
+      const msg = await ch.send(content.WELCOME_POST);
+      await msg.pin().catch(() => {});
+      await interaction.reply({ content: `Posted in <#${ch.id}> - and pinned, so it stays on top.`, ephemeral: true });
+    }
   } catch (e) {
     console.error('[crocodile-king] command error:', e);
     if (!interaction.replied) await interaction.reply({ content: 'The Crocodile King tripped on a cypress knee runnin\' that. Try again. He logged it.', ephemeral: true }).catch(() => {});
