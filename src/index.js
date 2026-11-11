@@ -116,6 +116,64 @@ async function fetchChannel(id, idName) {
   try { return await client.channels.fetch(id); } catch (e) { console.warn(`[crocodile-king] could not fetch channel ${idName}: ${e.message}`); return null; }
 }
 
+/* ------- welcome channel resolution (owner fix 2026-11-11) -------
+ * The wired welcome channel can exist yet refuse the King's posts
+ * (DiscordAPIError 50001 Missing Access: a locked channel keeps its
+ * own permission list, separate from his server-wide role). Resolving
+ * "a channel is set" was never the same as "he can post there", so
+ * resolve a channel he can ACTUALLY post in, in this order:
+ *   1. the /setup-wired channel, if postable
+ *   2. the server's own system channel (where Discord posts joins)
+ *   3. an existing channel named like the welcome door (new-members / welcome)
+ *   4. the channel the command was run in (admin standing in the door)
+ * No channel is ever created or renamed here - existing rooms only. */
+function canPostTo(channel, guild) {
+  try {
+    if (!channel || !channel.isTextBased || !channel.isTextBased()) return false;
+    const me = guild && guild.members ? guild.members.me : null;
+    if (!me) return false;
+    const perms = channel.permissionsFor(me);
+    return !!(perms && perms.has(PermissionFlagsBits.ViewChannel) && perms.has(PermissionFlagsBits.SendMessages));
+  } catch (e) { return false; }
+}
+
+async function resolveWelcomeChannel(guild, currentChannel) {
+  if (!guild) return null;
+  const tried = new Set();
+  const attempt = async (channel, source) => {
+    if (!channel || tried.has(channel.id)) return null;
+    tried.add(channel.id);
+    if (canPostTo(channel, guild)) return { channel, source };
+    console.warn(`[crocodile-king] welcome candidate #${channel.name || '?'} (${channel.id}) via ${source}: King cannot post there - trying next`);
+    return null;
+  };
+  if (config.welcomeChannelId) {
+    const wired = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID').catch(() => null);
+    const hit = await attempt(wired, 'setup pick');
+    if (hit) return hit;
+  }
+  { const hit = await attempt(guild.systemChannel, 'server system channel'); if (hit) return hit; }
+  const named = guild.channels.cache
+    .filter(c => c && c.isTextBased && c.isTextBased() && /new[- ]?members|welcome/i.test(c.name || ''))
+    .sort((a, b) => (a.rawPosition || 0) - (b.rawPosition || 0))
+    .first();
+  { const hit = await attempt(named, 'name match'); if (hit) return hit; }
+  if (currentChannel) { const hit = await attempt(currentChannel, 'command channel'); if (hit) return hit; }
+  return null;
+}
+
+/* If a fallback found the working door, write it back as the wiring so
+ * the next boot and the next join use it directly. */
+function healWelcomeChannel(resolved) {
+  if (!resolved || !resolved.channel) return;
+  if (config.welcomeChannelId === resolved.channel.id) return;
+  try {
+    store.setConfig({ welcomeChannelId: resolved.channel.id });
+    applyEffectiveConfig();
+    console.log(`[crocodile-king] welcome channel wiring set to #${resolved.channel.name} (${resolved.channel.id}) via ${resolved.source}`);
+  } catch (e) { console.warn('[crocodile-king] welcome channel self-heal failed:', e.message); }
+}
+
 function hasRole(member, roleId) {
   if (!member || !roleId) return false;
   return member.roles.cache.has(roleId);
@@ -449,8 +507,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
   rec.verified = isVerifiedMember(member);
   rec.reminderStage = 0;
   store.save();
-  const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
-  if (ch && ch.isTextBased()) {
+  const resolvedWelcome = await resolveWelcomeChannel(member.guild, null);
+  healWelcomeChannel(resolvedWelcome);
+  const ch = resolvedWelcome ? resolvedWelcome.channel : null;
+  if (ch) {
     const verifyText = config.verifyChannelId
       ? `head to <#${config.verifyChannelId}> and follow the pinned steps - one step, takes a minute`
       : config.verifyInstructions;
@@ -1462,8 +1522,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     else if (cmd === 'welcomepost') {
       if (!isAdmin) { await interaction.reply({ content: 'Admins hold the King\'s microphone.', ephemeral: true }); return; }
-      const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
-      if (!ch || !ch.isTextBased()) { await interaction.reply({ content: 'No welcome channel is assigned yet - set one in /setup first, then run this again.', ephemeral: true }); return; }
+      const resolved = await resolveWelcomeChannel(interaction.guild, interaction.channel);
+      if (!resolved) { await interaction.reply({ content: 'Discord would not let me post in the wired welcome channel, or in any welcome door I can find here. Locked channels keep their own guest list - check my role on that channel\'s own permissions, then run this again.', ephemeral: true }); return; }
+      healWelcomeChannel(resolved);
+      const ch = resolved.channel;
       const msg = await ch.send(content.WELCOME_POST);
       await msg.pin().catch(() => {});
       await interaction.reply({ content: `Posted in <#${ch.id}> - and pinned, so it stays on top.`, ephemeral: true });
