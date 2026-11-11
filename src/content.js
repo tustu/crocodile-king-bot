@@ -49,4 +49,41 @@ function hideWord(word) {
   return word[0] + '_'.repeat(word.length - 2) + word[word.length - 1];
 }
 
-module.exports = { QUESTS, questForDate, TRIVIA, GATOR_WORDS, hideWord };
+/** The big standing welcome post for the welcome channel, word for word the
+ * owner's text (set 2026-11-10). Posted by /welcomepost to whichever channel
+ * /setup assigned as the welcome channel, and pinned so it stays on top. */
+const WELCOME_POST = `🐊 **WELCOME TO THE SWAMP!** 🍻💨🎮
+
+Welcome to The Swamp, where we drink, smoke, game, talk shit, and have a good time!
+
+Thanks for joining our community! Before you can access everything the server has to offer, you’ll need to complete a quick verification with one of our Moderators or Admins.
+
+🔐 STEP 1: **JOIN THE WAITING ROOM**
+
+👉 https://discord.com/channels/337050121717940232/1484649222111494314
+
+Head into the waiting room and hang out until a staff member is available to verify you.
+
+📢 STEP 2: NEED A STAFF MEMBER?
+
+👉 https://discord.com/channels/337050121717940232/1498665398542008362
+
+If you’ve been waiting a while, head into Verify Chat and ping a Moderator or Admin for assistance.
+
+⏳ **PLEASE BE PATIENT**
+
+Our staff aren’t always available immediately, but someone will get to you as soon as possible. Please avoid repeatedly pinging the team.
+
+🎁 **AFTER VERIFICATION**
+
+Once approved by staff, you’ll unlock access to the server and receive your welcome rewards!
+
+🐊 **WELCOME TO THE FAMILY!**
+
+We appreciate you joining The Swamp! Make yourself at home, meet some new people, and get ready for some good times.
+
+Thanks for joining, and we look forward to smoking, gaming, and kicking back with you! 🍻💨🔥
+
+**THE SWAMP | DRINK • SMOKE • GAME** 🐊`;
+
+module.exports = { QUESTS, questForDate, TRIVIA, GATOR_WORDS, hideWord, WELCOME_POST };
