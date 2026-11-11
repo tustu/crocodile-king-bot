@@ -105,6 +105,7 @@ function buildCommands() {
     .addIntegerOption(o => o.setName('days').setDescription('Pass length in days (default 30)'))),
   admin(new SlashCommandBuilder().setName('hostsay').setDescription('Admin: Crocodile King posts a message in character')
     .addStringOption(o => o.setName('message').setDescription('What he says').setRequired(true))),
+  admin(new SlashCommandBuilder().setName('welcomepost').setDescription('Admin: Crocodile King posts the big welcome message in the welcome channel and pins it')),
   ].map(c => c.toJSON());
 }
 
