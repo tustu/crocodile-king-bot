@@ -455,6 +455,11 @@ client.on(Events.GuildMemberAdd, async (member) => {
       ? `head to <#${config.verifyChannelId}> and follow the pinned steps - one step, takes a minute`
       : config.verifyInstructions;
     await ch.send(line('welcome', { member: `<@${member.id}>`, verify: verifyText }, member.id.charCodeAt(0))).catch(() => {});
+    // The owner's standing welcome text, word for word, on EVERY join
+    // (owner's order 2026-11-10: the /welcomepost route did not land for
+    // them, so the text rides the join greeting). A failed send is logged
+    // loudly - a silent miss here looks like the King ignoring joins.
+    await ch.send(content.WELCOME_POST).catch((e) => console.error('[crocodile-king] welcome post on join failed:', e.message));
   }
 });
 
