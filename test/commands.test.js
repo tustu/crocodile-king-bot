@@ -8,7 +8,7 @@ const { buildCommands, commands } = require('../src/deploy-commands');
 
 test('buildCommands returns 25 valid command JSONs', () => {
   const body = buildCommands();
-  assert.equal(body.length, 26);
+  assert.equal(body.length, 27); // 26 + /moodpick (profile system)
   for (const c of body) {
     assert.equal(typeof c.name, 'string');
     assert.match(c.name, /^[a-z0-9_-]{1,32}$/);
