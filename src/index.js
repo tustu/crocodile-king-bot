@@ -820,7 +820,7 @@ async function handleStorefrontComponent(interaction, parsed) {
   const rec = store.user(interaction.user.id);
   if (parsed.action === 'nav') {
     const view = storefrontLib.buildStorefront(parsed.arg, rec);
-    await interaction.update({ embeds: view.embeds, components: view.components });
+    await interaction.update({ embeds: view.embeds, components: view.components, files: view.files });
     return;
   }
   if (parsed.action === 'pick') {
@@ -829,7 +829,7 @@ async function handleStorefrontComponent(interaction, parsed) {
     if (sep < 1) return;
     const prompt = storefrontLib.buildPickPrompt(value.slice(0, sep), value.slice(sep + 1), rec);
     if (!prompt) { await interaction.reply({ content: 'That line of the shelf has moved. /store open for the fresh board.', ephemeral: true }); return; }
-    await interaction.reply({ content: prompt.content, components: prompt.components, ephemeral: true });
+    await interaction.reply({ content: prompt.content, components: prompt.components, embeds: prompt.embeds, files: prompt.files, ephemeral: true });
     return;
   }
   if (parsed.action === 'buy') {
@@ -1294,11 +1294,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // The member's own storefront: same pages/buttons as the pinned
         // board, ephemeral, with their balance and wardrobe on it.
         const view = storefrontLib.buildStorefront('decor', rec);
-        await interaction.reply({ embeds: view.embeds, components: view.components, ephemeral: true });
+        await interaction.reply({ embeds: view.embeds, components: view.components, files: view.files, ephemeral: true });
       } else if (sub === 'post') {
         if (!isMod) { await interaction.reply({ content: 'Mods hang the storefront sign. The King likes his shopfront official.', ephemeral: true }); return; }
         const view = storefrontLib.buildStorefront('decor', null);
-        const msg = await interaction.channel.send({ embeds: view.embeds, components: view.components });
+        const msg = await interaction.channel.send({ embeds: view.embeds, components: view.components, files: view.files });
         await interaction.reply({ content: `🛒 Storefront posted in this channel${msg ? ` (${msg.id})` : ''}. **Pin it** and it is the shop door for good - its buttons keep working across restarts, nothing is stored on the message. Members can also run /store open anywhere for a personal copy.`, ephemeral: true });
       } else if (sub === 'buy') {
         const r = await storeBuyText(interaction, rec, interaction.options.getString('item'));
