@@ -8,6 +8,7 @@ const http = require('http');
 const {
   Client, GatewayIntentBits, Partials, Events, EmbedBuilder,
   PermissionFlagsBits, ActivityType, AttachmentBuilder, ChannelType,
+  ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
   REST, Routes,
 } = require('discord.js');
 const { buildCommands } = require('./deploy-commands');
@@ -26,6 +27,8 @@ const shopLib = require('./shop');
 const avatarLib = require('./avatarframe');
 const backgroundsLib = require('./backgrounds');
 const storefrontLib = require('./storefront');
+const profileLib = require('./profilecard');
+const petsLib = require('./pets');
 const bucksMod = require('./bucksbridge');
 const bucksBridge = bucksMod.bridge; // Swamp Bucks Bridge (off unless SWAMP_BUCKS_API_BASE + SWAMP_BUCKS_SECRET are set)
 
@@ -401,6 +404,7 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,      // privileged: Server Members
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,    // privileged: Message Content
+    GatewayIntentBits.GuildPresences,    // privileged: Presence (portal: ON) - profile mood aura + pet sleep state
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessageReactions,
   ],
@@ -594,6 +598,8 @@ client.on(Events.MessageCreate, async (message) => {
   if (!rec.joinedAt) rec.joinedAt = message.member && message.member.joinedAt ? message.member.joinedAt.getTime() : Date.now();
   if (!rec.verified && isVerifiedMember(message.member)) { rec.verified = true; }
   rec.totalMessages++;
+  // Pet levels up as its owner chats (+1 XP per message while a pet exists)
+  if (rec.profile && rec.profile.pet) rec.profile.pet.xp = (rec.profile.pet.xp || 0) + 1;
   const quest = resetQuestIfNewDay(rec);
   rec.questProgress.messages++;
   bumpSideQuest(rec, 'messages');
@@ -720,45 +726,143 @@ async function spawnEvent(channel, kind, startedBy) {
 }
 
 /* ---------------- slash commands ---------------- */
-function profileEmbed(user, rec, member) {
-  const lvl = xpLib.levelFromXp(rec.xp);
-  const m = multiplierFor(member, rec, null);
-  titlesLib.ensureTitles(rec);
-  ensureActionPoints(rec, member);
-  const faction = factionsLib.factionById(rec.faction);
-  const invCount = lootLib.inventoryCount(rec);
-  const topItems = lootLib.inventoryList(rec).slice(0, 3).map(i => `${i.name} x${i.count}`).join(', ');
-  const passText = isPassActive(rec)
-    ? `VIP Pass live until ${new Date(rec.passUntil).toISOString().slice(0, 10)}`
-    : (isRoyaltyRole(member) ? 'Swamp Royalty Pass role' : 'None');
-  const wornFrame = avatarLib.equippedFrame(rec);
-  const frameField = wornFrame
-    ? [{ name: 'Avatar frame', value: `🖼️ **${wornFrame.name}** - worn on this card · /avatarframe apply makes it a picture you can upload`, inline: true }]
-    : [];
-  const boosterField = (member && isBoosterMember(member))
-    ? [{ name: 'Booster Pack', value: rec.lastBoostPackMonth === lootLib.monthKeyInHalifax(new Date(), tz)
-      ? `Claimed for ${lootLib.monthNameInHalifax(new Date(), tz)} - next pack lands next month while you boost`
-      : `Due for ${lootLib.monthNameInHalifax(new Date(), tz)} - lands automatically while you boost`, inline: true }]
-    : [];
-  return new EmbedBuilder()
-    .setTitle(`🐊 ${user.username} - Level ${lvl.level} ${ladderTitleFor(lvl.level)}`)
-    .setColor(0x2e7d32)
-    .addFields(
-      { name: 'XP', value: `${rec.xp} total · ${lvl.xpIntoLevel}/${lvl.xpForNext} to next level`, inline: true },
-      { name: 'Swamp Bucks', value: `${rec.swampBucks}`, inline: true },
-      { name: 'Daily streak', value: `${rec.streak} day(s)`, inline: true },
-      { name: 'Reputation', value: `${rec.rep || 0} Rep - ${factionsLib.repRankFor(rec.rep || 0)}`, inline: true },
-      { name: 'Faction', value: faction ? faction.name : 'None yet - /faction join and pick a banner', inline: true },
-      { name: 'Cosmetic title', value: rec.activeTitle ? `*${rec.activeTitle}*` : 'None yet - first one unlocks by deed, generated one mints at Level 5', inline: true },
-      { name: 'Inventory', value: invCount ? `${invCount} item(s)${topItems ? ` - ${topItems}` : ''} · /inventory for the full bag` : 'Empty - loot drops from /daily, level-ups and events', inline: false },
-      { name: 'Pass', value: passText, inline: true },
-      ...frameField,
-      ...boosterField,
-      { name: 'Action points today', value: `${rec.actionPoints} left (trivia + gator cost 1 each)`, inline: true },
-      { name: 'XP bonus right now', value: breakdownText(m), inline: false },
-      { name: 'Verified', value: rec.verified || isVerifiedMember(member) ? 'Yes - bonus live' : 'No - verify for +25% XP', inline: true },
-    )
-    .setFooter({ text: 'The Crocodile King keeps the books. The books do not lie.' });
+/** Show a member's generated profile card (image + details embed).
+ *  Deferred: the canvas render fetches the avatar/banner and can take a
+ *  second or two, past the 3s interaction window. */
+async function showProfileCard(interaction, target) {
+  await interaction.deferReply();
+  const tRec = store.user(target.id);
+  titlesLib.ensureTitles(tRec);
+  let tMember = null;
+  if (interaction.guild) tMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+  const view = await profileLib.buildProfileReply({
+    user: target, rec: tRec, member: tMember || interaction.member,
+    viewerId: interaction.user.id,
+    presence: tMember && tMember.presence ? tMember.presence.status : null,
+    voiceChannelName: tMember && tMember.voice && tMember.voice.channel ? tMember.voice.channel.name : null,
+    now: new Date(),
+  });
+  await interaction.editReply({ embeds: view.embeds, files: view.files, components: view.components });
+}
+
+/* ---------------- profile guestbook components (stateless, restart-proof) ----------------
+ * Same durability rule as the storefront: routing is purely the customId
+ * (pf:wall:note|list|submit:<ownerId>). No collectors, no sessions. */
+async function handleProfileComponent(interaction, parsed) {
+  // Save & post: owner-only. Drops the clean card into this channel as a
+  // permanent post (no pin needed - it just stays there). Saving again
+  // refreshes the same post in place, so the channel never fills with
+  // duplicates; if the old post was deleted, a fresh one goes up.
+  if (parsed.kind === 'save') {
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({ content: 'That card is not yours to save - open your own with /profile view.', ephemeral: true });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const rec = store.user(interaction.user.id);
+    const p = profileLib.ensureProfile(rec);
+    const view = await profileLib.buildProfileReply({
+      user: interaction.user, rec, member: interaction.member,
+      viewerId: interaction.user.id,
+      presence: interaction.member && interaction.member.presence ? interaction.member.presence.status : null,
+      voiceChannelName: interaction.member && interaction.member.voice && interaction.member.voice.channel ? interaction.member.voice.channel.name : null,
+      now: new Date(),
+    });
+    const payload = { embeds: view.embeds, files: view.files }; // clean: no editor controls on the permanent post
+    const channel = interaction.channel || (interaction.guild ? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null) : null);
+    if (!channel || typeof channel.send !== 'function') {
+      await interaction.editReply({ content: '💾 The King could not find this channel to post in - try /profile view in the profile channel and save there.' });
+      return;
+    }
+    let posted = null;
+    if (p.postedMessageId && p.postedChannelId) {
+      const oldChannel = p.postedChannelId === channel.id ? channel : (interaction.guild ? await interaction.guild.channels.fetch(p.postedChannelId).catch(() => null) : null);
+      if (oldChannel && oldChannel.messages) {
+        const oldMsg = await oldChannel.messages.fetch(p.postedMessageId).catch(() => null);
+        if (oldMsg) posted = await oldMsg.edit(payload).catch(() => null);
+      }
+    }
+    if (!posted) {
+      posted = await channel.send(payload).catch(() => null);
+      if (!posted) {
+        await interaction.editReply({ content: '💾 The King could not post your card here - check he can send messages in this channel, then try again.' });
+        return;
+      }
+      p.postedMessageId = posted.id;
+      p.postedChannelId = channel.id;
+      store.save();
+      await interaction.editReply({ content: `💾 Your card is posted in <#${channel.id}> - it stays there. Change anything and hit Save & post again to refresh the same post.` });
+    } else {
+      store.save();
+      await interaction.editReply({ content: `💾 Your card in <#${p.postedChannelId}> is refreshed - same post, new look.` });
+    }
+    return;
+  }
+  // Layout editor selects: owner-only, re-render the card live.
+  if (parsed.kind === 'layout') {
+    if (interaction.user.id !== parsed.ownerId) {
+      await interaction.reply({ content: 'That card is not yours to rearrange - open your own with /profile view.', ephemeral: true });
+      return;
+    }
+    const value = (interaction.values && interaction.values[0]) || '';
+    const rec = store.user(interaction.user.id);
+    const p = profileLib.ensureProfile(rec);
+    let r;
+    if (parsed.field === 'preset') r = profileLib.applyLayoutPreset(p, value);
+    else r = profileLib.setLayoutField(p, parsed.field, value);
+    if (!r.ok) { await interaction.reply({ content: `🎨 ${r.reason}`, ephemeral: true }); return; }
+    store.save();
+    await interaction.deferUpdate();
+    const view = await profileLib.buildProfileReply({
+      user: interaction.user, rec, member: interaction.member,
+      viewerId: interaction.user.id,
+      presence: interaction.member && interaction.member.presence ? interaction.member.presence.status : null,
+      voiceChannelName: interaction.member && interaction.member.voice && interaction.member.voice.channel ? interaction.member.voice.channel.name : null,
+      now: new Date(),
+    });
+    await interaction.editReply({ embeds: view.embeds, files: view.files, components: view.components });
+    return;
+  }
+  if (parsed.action === 'note') {
+    if (interaction.user.id === parsed.ownerId) {
+      await interaction.reply({ content: 'You cannot leave a note on your own wall - that is what your bio is for.', ephemeral: true });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(profileLib.wallSubmitId(parsed.ownerId))
+      .setTitle('Leave a note on the wall');
+    const noteInput = new TextInputBuilder()
+      .setCustomId('note').setLabel('Your note').setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(profileLib.WALL_NOTE_MAX).setRequired(true)
+      .setPlaceholder('Short and sweet - the wall remembers.');
+    const stampInput = new TextInputBuilder()
+      .setCustomId('stamp').setLabel('Stamp (one emoji, optional)').setStyle(TextInputStyle.Short)
+      .setMaxLength(10).setRequired(false).setPlaceholder('🐊');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(noteInput),
+      new ActionRowBuilder().addComponents(stampInput),
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+  if (parsed.action === 'list') {
+    const ownerRec = store.user(parsed.ownerId);
+    const p = profileLib.ensureProfile(ownerRec);
+    await interaction.reply({ content: `📖 **Guestbook** (${p.wall.length})\n${profileLib.wallLines(p, 20)}`, ephemeral: true });
+    return;
+  }
+}
+
+async function handleProfileModal(interaction, parsed) {
+  if (parsed.action !== 'submit') return;
+  const ownerRec = store.user(parsed.ownerId);
+  const p = profileLib.ensureProfile(ownerRec);
+  const text = interaction.fields.getTextInputValue('note');
+  const stamp = interaction.fields.getTextInputValue('stamp') || '';
+  const r = profileLib.addWallNote(p, { by: interaction.user.id, name: interaction.user.username, text, stamp });
+  if (!r.ok) { await interaction.reply({ content: `📖 ${r.reason}`, ephemeral: true }); return; }
+  store.save();
+  await interaction.reply({ content: `📖 Note left on <@${parsed.ownerId}>'s wall. The swamp remembers kindness.`, ephemeral: true });
 }
 
 /* ---------------- the store: ONE purchase path ----------------
@@ -819,17 +923,23 @@ function storeSellText(rec, input) {
 async function handleStorefrontComponent(interaction, parsed) {
   const rec = store.user(interaction.user.id);
   if (parsed.action === 'nav') {
+    // Defer FIRST: the new page carries up to ~17MB of store art and the
+    // upload regularly outruns Discord's 3s acknowledgement window
+    // (Unknown interaction 10062). Deferring buys the full 15 minutes.
+    await interaction.deferUpdate();
     const view = storefrontLib.buildStorefront(parsed.arg, rec);
-    await interaction.update({ embeds: view.embeds, components: view.components, files: view.files });
+    await interaction.editReply({ embeds: view.embeds, components: view.components, files: view.files });
     return;
   }
   if (parsed.action === 'pick') {
     const value = (interaction.values && interaction.values[0]) || '';
     const sep = value.indexOf(':');
     if (sep < 1) return;
+    // Defer first for the same reason: the price check can carry a picture.
+    await interaction.deferReply({ ephemeral: true });
     const prompt = storefrontLib.buildPickPrompt(value.slice(0, sep), value.slice(sep + 1), rec);
-    if (!prompt) { await interaction.reply({ content: 'That line of the shelf has moved. /store open for the fresh board.', ephemeral: true }); return; }
-    await interaction.reply({ content: prompt.content, components: prompt.components, embeds: prompt.embeds, files: prompt.files, ephemeral: true });
+    if (!prompt) { await interaction.editReply({ content: 'That line of the shelf has moved. /store open for the fresh board.' }); return; }
+    await interaction.editReply({ content: prompt.content, components: prompt.components, embeds: prompt.embeds, files: prompt.files });
     return;
   }
   if (parsed.action === 'buy') {
@@ -984,7 +1094,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try { await handleStorefrontComponent(interaction, parsed); }
       catch (e) {
         console.error('[crocodile-king] storefront component error:', e);
-        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'The storefront hiccuped on that tap. Nothing was charged - try again.', ephemeral: true }).catch(() => {});
+        // Deferred already (nav/pick defer first): answer with an ephemeral
+        // follow-up, never editReply - that would wipe the board itself.
+        if (interaction.deferred) await interaction.followUp({ content: 'The storefront hiccuped on that tap. Nothing was charged - try again.', ephemeral: true }).catch(() => {});
+        else if (!interaction.replied) await interaction.reply({ content: 'The storefront hiccuped on that tap. Nothing was charged - try again.', ephemeral: true }).catch(() => {});
+      }
+      return;
+    }
+    const pf = profileLib.parseCustomId(interaction.customId);
+    if (pf) {
+      try { await handleProfileComponent(interaction, pf); }
+      catch (e) {
+        console.error('[crocodile-king] profile component error:', e);
+        if (interaction.deferred) await interaction.followUp({ content: 'The card hiccuped on that tap. Nothing was saved - try again.', ephemeral: true }).catch(() => {});
+        else if (!interaction.replied) await interaction.reply({ content: 'The guestbook hiccuped on that tap. Nothing was saved - try again.', ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+  if (interaction.isModalSubmit()) {
+    const pf = profileLib.parseCustomId(interaction.customId);
+    if (pf) {
+      try { await handleProfileModal(interaction, pf); }
+      catch (e) {
+        console.error('[crocodile-king] profile modal error:', e);
+        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'The note did not stick. Try again - the wall is patient.', ephemeral: true }).catch(() => {});
       }
     }
     return;
@@ -1025,25 +1159,184 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    else if (cmd === 'profile' || cmd === 'rank') {
+    else if (cmd === 'rank') {
       const target = interaction.options.getUser('member') || interaction.user;
-      const tRec = store.user(target.id);
-      let tMember = null;
-      if (interaction.guild) tMember = await interaction.guild.members.fetch(target.id).catch(() => null);
-      const embed = profileEmbed(target, tRec, tMember || interaction.member);
-      // Equipped profile background rides as the card's image, next to the
-      // equipped frame field - both decorations show on the one card.
-      const bg = backgroundsLib.equippedBackground(tRec);
-      if (bg) {
-        try {
-          embed.setImage(`attachment://${bg.file}`);
-          await interaction.reply({ embeds: [embed], files: [new AttachmentBuilder(backgroundsLib.backgroundPath(bg.id), { name: bg.file })] });
-        } catch (e) {
-          console.warn('[crocodile-king] profile background attach failed:', e.message);
-          await interaction.reply({ embeds: [embed] });
+      await showProfileCard(interaction, target);
+    }
+
+    else if (cmd === 'moodpick') {
+      const pick = interaction.options.getString('mood');
+      const p = profileLib.ensureProfile(rec);
+      if (pick === 'clear') {
+        p.mood = null;
+        store.save();
+        await interaction.reply({ content: '🌫️ Mood cleared - your aura follows your live status again, and your pet goes back to its own moods.', ephemeral: true });
+        return;
+      }
+      const mood = profileLib.moodById(pick);
+      if (!mood) { await interaction.reply({ content: 'That mood is not in the swamp. Pick one from the list.', ephemeral: true }); return; }
+      p.mood = mood.id;
+      store.save();
+      await interaction.reply({ content: `🎭 Mood set: **${mood.name}** - ${mood.blurb}\nYour card's aura glows ${mood.name.toLowerCase()} now, and your pet wears the matching mood. /profile view to see it.`, ephemeral: true });
+    }
+
+    else if (cmd === 'profile') {
+      const sub = interaction.options.getSubcommand();
+      const p = profileLib.ensureProfile(rec);
+      if (sub === 'view') {
+        const target = interaction.options.getUser('member') || interaction.user;
+        await showProfileCard(interaction, target);
+      } else if (sub === 'bio') {
+        p.bio = interaction.options.getString('text').trim().slice(0, profileLib.BIO_MAX);
+        store.save();
+        await interaction.reply({ content: `✍️ Bio set: "${p.bio}"\nIt rides on your card from now on. /profile view to admire it.`, ephemeral: true });
+      } else if (sub === 'banner') {
+        const theme = interaction.options.getString('theme');
+        const url = interaction.options.getString('url');
+        const clear = interaction.options.getBoolean('clear');
+        if (clear) {
+          p.banner = null; p.bannerUrl = null;
+          store.save();
+          await interaction.reply({ content: '🖼️ Custom banner cleared - your equipped theme hangs behind the card again.', ephemeral: true });
+        } else if (url) {
+          const v = profileLib.validateBannerUrl(url);
+          if (!v.ok) { await interaction.reply({ content: `🖼️ ${v.reason}`, ephemeral: true }); return; }
+          // Best-effort content check: a HEAD fetch that says image/* is
+          // proof; a failed fetch is NOT proof of a bad link (hosting
+          // networks lie), so the extension check above still carries it.
+          let checked = false;
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 8000);
+            try {
+              const res = await fetch(v.url, { method: 'HEAD', signal: ctrl.signal });
+              const ct = res.headers.get('content-type') || '';
+              if (res.ok && ct && !ct.startsWith('image/')) {
+                await interaction.reply({ content: '🖼️ That link answers, but it is not a picture - the King checked the label.', ephemeral: true });
+                return;
+              }
+              if (res.ok) checked = true;
+            } finally { clearTimeout(timer); }
+          } catch { /* network shrug - extension check stands */ }
+          p.bannerUrl = v.url; p.banner = null;
+          store.save();
+          await interaction.reply({ content: `🖼️ Custom banner set - it hangs behind your card now.${checked ? ' The King checked: it is a real picture.' : ' (The King could not reach the link to double-check it - if the card shows the fallback instead, the link may be dead.)'}`, ephemeral: true });
+        } else if (theme) {
+          if (!backgroundsLib.ownsBackground(rec, theme)) {
+            const def = backgroundsLib.backgroundById(theme);
+            await interaction.reply({ content: `🖼️ You do not own **${def ? def.name : theme}** yet - it sits in /store. Buy it once and it is yours forever.`, ephemeral: true });
+            return;
+          }
+          p.banner = theme; p.bannerUrl = null;
+          store.save();
+          await interaction.reply({ content: `🖼️ Banner set: **${backgroundsLib.backgroundById(theme).name}**. /profile view to see it behind you.`, ephemeral: true });
+        } else {
+          const cur = p.bannerUrl ? `custom URL: ${p.bannerUrl}` : (p.banner ? backgroundsLib.backgroundById(p.banner).name : (backgroundsLib.equippedBackground(rec) ? `${backgroundsLib.equippedBackground(rec).name} (equipped)` : 'none yet'));
+          await interaction.reply({ content: `🖼️ Current banner: **${cur}**\nOwned themes: ${backgroundsLib.BACKGROUNDS.filter(b => backgroundsLib.ownsBackground(rec, b.id)).map(b => b.name).join(', ') || 'none yet - /store sells them'}.`, ephemeral: true });
         }
-      } else {
-        await interaction.reply({ embeds: [embed] });
+      } else if (sub === 'privacy') {
+        const fields = ['rank', 'inventory', 'activity', 'balance'];
+        let changed = false;
+        for (const f of fields) {
+          const v = interaction.options.getBoolean(f);
+          if (v !== null && v !== undefined) { p.privacy[f] = v; changed = true; }
+        }
+        if (changed) store.save();
+        const tick = (v) => (v ? '👁️ shown' : '🔒 hidden');
+        await interaction.reply({ content: `🔐 **Your card privacy** (other members viewing your card):\nRank: ${tick(p.privacy.rank)} · Inventory: ${tick(p.privacy.inventory)} · Activity: ${tick(p.privacy.activity)} · Balance: ${tick(p.privacy.balance)}\nYour own view always shows everything.`, ephemeral: true });
+      } else if (sub === 'style') {
+        p.style = interaction.options.getString('style');
+        store.save();
+        await interaction.reply({ content: `🎴 Card style set: **${p.style === 'passport' ? 'Swamp Passport' : 'Swamp Trading Card'}**. /profile view to see the new frame.`, ephemeral: true });
+      } else if (sub === 'color') {
+        const hex = interaction.options.getString('hex').trim();
+        if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+          await interaction.reply({ content: '🎨 That is not a hex color - give me six hex digits with a #, like #ff7043.', ephemeral: true });
+          return;
+        }
+        p.favColor = hex.toLowerCase();
+        store.save();
+        await interaction.reply({ content: `🎨 Favorite color set: **${p.favColor}** - your card's accent now. /profile view to see it glow.`, ephemeral: true });
+      } else if (sub === 'timezone') {
+        const zone = interaction.options.getString('zone').trim();
+        if (!profileLib.validTimezone(zone)) {
+          await interaction.reply({ content: `🌍 "${zone}" is not a timezone the King knows - use an IANA name like America/Halifax, America/New_York or Europe/London.`, ephemeral: true });
+          return;
+        }
+        p.timezone = zone;
+        store.save();
+        await interaction.reply({ content: `🌍 Timezone set: **${zone}** - your card's lighting now follows your local hour (${profileLib.TIME_LABELS[profileLib.timeOfDay(new Date(), zone)]}).`, ephemeral: true });
+      } else if (sub === 'showcase') {
+        const action = interaction.options.getString('action');
+        if (action === 'list') {
+          await interaction.reply({ content: `📌 **Your showcase** (${p.showcase.length}/${profileLib.SHOWCASE_MAX})\n${profileLib.showcaseLines(p)}`, ephemeral: true });
+        } else if (action === 'add') {
+          const r = profileLib.addShowcase(p, interaction.options.getString('kind'), interaction.options.getString('value'), rec);
+          if (!r.ok) { await interaction.reply({ content: `📌 ${r.reason}`, ephemeral: true }); return; }
+          store.save();
+          await interaction.reply({ content: `📌 Pinned to slot ${r.slot}: **${interaction.options.getString('value')}**. It shows on your card now.`, ephemeral: true });
+        } else {
+          const slot = interaction.options.getInteger('slot');
+          if (!slot) { await interaction.reply({ content: '📌 Say which slot to remove (1-4). /profile showcase list shows your pins.', ephemeral: true }); return; }
+          const r = profileLib.removeShowcase(p, slot);
+          if (!r.ok) { await interaction.reply({ content: `📌 ${r.reason}`, ephemeral: true }); return; }
+          store.save();
+          await interaction.reply({ content: `📌 Unpinned: **${r.removed.value}**. Slot ${slot} is free again.`, ephemeral: true });
+        }
+      } else if (sub === 'pet') {
+        const action = interaction.options.getString('action');
+        if (action === 'adopt') {
+          if (p.pet) {
+            await interaction.reply({ content: `🐾 You already have **${p.pet.name || petsLib.speciesById(p.pet.species).name}**. One critter per swamp member - feed it, name it, love it.`, ephemeral: true });
+            return;
+          }
+          const speciesId = interaction.options.getString('species');
+          const species = petsLib.speciesById(speciesId);
+          if (!species) { await interaction.reply({ content: '🐾 Pick a critter from the list: Gator Pup, Firefly or Swamp Frog.', ephemeral: true }); return; }
+          const name = (interaction.options.getString('name') || species.name).trim().slice(0, 20);
+          p.pet = { species: species.id, name, xp: 0, fedAt: 0, adoptedAt: Date.now() };
+          store.save();
+          await interaction.reply({ content: `🐾 **${name}** the ${species.name} hops onto your card! ${species.blurb}\nIt levels up as you chat. Feed it with /profile pet feed, and /profile view to see it in the corner.`, ephemeral: true });
+        } else if (action === 'feed') {
+          if (!p.pet) { await interaction.reply({ content: '🐾 No pet to feed - /profile pet adopt first.', ephemeral: true }); return; }
+          p.pet.fedAt = Date.now();
+          store.save();
+          await interaction.reply({ content: `🍖 You feed **${p.pet.name}**. It munches happily for the next half hour - catch it mid-snack on your card.`, ephemeral: true });
+        } else if (action === 'rename') {
+          if (!p.pet) { await interaction.reply({ content: '🐾 No pet to rename - /profile pet adopt first.', ephemeral: true }); return; }
+          const name = (interaction.options.getString('name') || '').trim().slice(0, 20);
+          if (!name) { await interaction.reply({ content: '🐾 Give your pet a name (up to 20 characters).', ephemeral: true }); return; }
+          p.pet.name = name;
+          store.save();
+          await interaction.reply({ content: `🐾 Your pet answers to **${name}** now.`, ephemeral: true });
+        } else if (action === 'habitat') {
+          const theme = interaction.options.getString('habitat');
+          const def = petsLib.habitatById(theme);
+          if (!theme || !petsLib.HABITAT_THEMES.some(h => h.id === theme)) {
+            await interaction.reply({ content: `🌿 Pick a habitat from the list: ${petsLib.HABITAT_THEMES.map(h => h.name).join(', ')}.`, ephemeral: true });
+            return;
+          }
+          p.habitat = def.id;
+          store.save();
+          await interaction.reply({ content: `🌿 Habitat strip set: **${def.name}** - ${def.blurb}`, ephemeral: true });
+        } else {
+          if (!p.pet) { await interaction.reply({ content: '🐾 No pet yet - /profile pet adopt picks your critter.', ephemeral: true }); return; }
+          const species = petsLib.speciesById(p.pet.species);
+          const lvl = petsLib.petLevel(p.pet);
+          await interaction.reply({ content: `🐾 **${p.pet.name}** the ${species.name} - Level ${lvl} (${p.pet.xp} XP, next at ${petsLib.petXpForNextLevel(p.pet)})\n"${petsLib.petSpeech(p.pet)}"\nHabitat: ${petsLib.habitatById(p.habitat).name}. It levels up as you chat.`, ephemeral: true });
+        }
+      } else if (sub === 'wall') {
+        const action = interaction.options.getString('action');
+        if (action === 'list') {
+          await interaction.reply({ content: `📖 **Your guestbook** (${p.wall.length})\n${profileLib.wallLines(p, 20)}`, ephemeral: true });
+        } else {
+          const note = interaction.options.getInteger('note');
+          if (!note) { await interaction.reply({ content: '📖 Say which note to remove. /profile wall list shows the numbers.', ephemeral: true }); return; }
+          const r = profileLib.removeWallNote(p, note, interaction.user.id, interaction.user.id, isMod);
+          if (!r.ok) { await interaction.reply({ content: `📖 ${r.reason}`, ephemeral: true }); return; }
+          store.save();
+          await interaction.reply({ content: `📖 Pulled note ${note} off the wall: "${r.removed.text}"`, ephemeral: true });
+        }
       }
     }
 

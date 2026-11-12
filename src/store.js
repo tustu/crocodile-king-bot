@@ -69,6 +69,8 @@ function blankUser(userId) {
     pendingLinkCode: null,     // last /link code issued, while it can still be redeemed
     pendingLinkAt: 0,          // ms epoch the pending code was issued
     pendingKeys: [],           // sponsor prize keys held for this member, viewed with /prize (never DM'd)
+    // --- profile system (src/profilecard.js) ---
+    profile: null,             // { bio, favColor, privacy, banner, bannerUrl, style, timezone, mood, showcase, pet, wall, habitat } - backfilled by ensureProfile
   };
 }
 
@@ -155,6 +157,7 @@ class Store {
     if (!Array.isArray(u.backgrounds)) u.backgrounds = [];
     if (!u.consumables || typeof u.consumables !== 'object') u.consumables = {};
     if (!Array.isArray(u.bucksOutbox)) u.bucksOutbox = [];
+    if (u.profile !== null && (typeof u.profile !== 'object' || Array.isArray(u.profile))) u.profile = null;
     return u;
   }
 }

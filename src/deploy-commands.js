@@ -11,6 +11,9 @@ const { FACTIONS } = require('./factions');
 const { LOOT_TABLE } = require('./loot');
 const { SHOP_ITEMS, SELLABLE, SELL_PRICES } = require('./shop');
 const { FRAMES } = require('./avatarframe');
+const { BACKGROUNDS } = require('./backgrounds');
+const { MOODS } = require('./profilecard');
+const { PET_SPECIES, HABITAT_THEMES } = require('./pets');
 
 const admin = (c) => c.setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 const setupPerms = (c) => c.setDefaultMemberPermissions(PermissionFlagsBits.Administrator | PermissionFlagsBits.ManageGuild);
@@ -22,9 +25,51 @@ function buildCommands() {
     .addSubcommand(s => s.setName('show').setDescription('The whole wiring at a glance, plus what is still missing'))
     .addSubcommand(s => s.setName('create').setDescription('The King builds ONLY the missing pieces (roles/channels), defaults + right permissions'))
     .addSubcommand(s => s.setName('reset').setDescription('Clear the stored wiring back to the env seed (member books NOT touched)'))),
-  new SlashCommandBuilder().setName('profile').setDescription('Show a member\'s swamp profile: level, XP, Bucks, streak and bonuses')
-    .addUserOption(o => o.setName('member').setDescription('Whose profile (default: you)')),
-  new SlashCommandBuilder().setName('rank').setDescription('Same book as /profile - your level, XP and title')
+  new SlashCommandBuilder().setName('profile').setDescription('Your swamp profile card: bio, banner, style, pet, showcase, guestbook')
+    .addSubcommand(s => s.setName('view').setDescription('Show a member\'s visual swamp card')
+      .addUserOption(o => o.setName('member').setDescription('Whose card (default: you)')))
+    .addSubcommand(s => s.setName('bio').setDescription('Write your short bio / status (160 characters max)')
+      .addStringOption(o => o.setName('text').setDescription('Your bio').setRequired(true).setMaxLength(160)))
+    .addSubcommand(s => s.setName('banner').setDescription('Pick an owned background theme, or set a custom banner image URL')
+      .addStringOption(o => o.setName('theme').setDescription('An owned background theme')
+        .addChoices(...BACKGROUNDS.map(b => ({ name: b.name, value: b.id }))))
+      .addStringOption(o => o.setName('url').setDescription('Custom banner image URL (.png/.jpg/.gif/.webp)'))
+      .addBooleanOption(o => o.setName('clear').setDescription('Clear the custom banner back to your equipped theme')))
+    .addSubcommand(s => s.setName('privacy').setDescription('Hide or show parts of your card to other members (your own view always shows all)')
+      .addBooleanOption(o => o.setName('rank').setDescription('Show your level + XP to others'))
+      .addBooleanOption(o => o.setName('inventory').setDescription('Show your loot bag to others'))
+      .addBooleanOption(o => o.setName('activity').setDescription('Show your streak + messages to others'))
+      .addBooleanOption(o => o.setName('balance').setDescription('Show your Swamp Bucks to others')))
+    .addSubcommand(s => s.setName('style').setDescription('Card style: swamp trading card or swamp passport')
+      .addStringOption(o => o.setName('style').setDescription('Card style').setRequired(true)
+        .addChoices({ name: 'Swamp Trading Card', value: 'trading' }, { name: 'Swamp Passport', value: 'passport' })))
+    .addSubcommand(s => s.setName('color').setDescription('Your favorite color - the card accent')
+      .addStringOption(o => o.setName('hex').setDescription('A hex color, e.g. #ff7043').setRequired(true)))
+    .addSubcommand(s => s.setName('timezone').setDescription('Your timezone - the card lighting shifts with your local hour')
+      .addStringOption(o => o.setName('zone').setDescription('IANA name, e.g. America/Halifax').setRequired(true)))
+    .addSubcommand(s => s.setName('showcase').setDescription('Pin your best to the card - up to 4 slots')
+      .addStringOption(o => o.setName('action').setDescription('What to do').setRequired(true)
+        .addChoices({ name: 'Add a pin', value: 'add' }, { name: 'Remove a pin', value: 'remove' }, { name: 'List pins', value: 'list' }))
+      .addStringOption(o => o.setName('kind').setDescription('What kind of pin')
+        .addChoices({ name: 'Achievement title', value: 'achievement' }, { name: 'Title', value: 'title' }, { name: 'Loot item', value: 'loot' }, { name: 'Emoji', value: 'emoji' }, { name: 'Score', value: 'score' }))
+      .addStringOption(o => o.setName('value').setDescription('The title, loot name, emoji or score to pin').setMaxLength(40))
+      .addIntegerOption(o => o.setName('slot').setDescription('Slot number to remove (1-4)')))
+    .addSubcommand(s => s.setName('pet').setDescription('Your swamp pixel pet - adopt, feed, rename, pick its habitat')
+      .addStringOption(o => o.setName('action').setDescription('What to do').setRequired(true)
+        .addChoices({ name: 'Adopt a pet', value: 'adopt' }, { name: 'Feed your pet', value: 'feed' }, { name: 'Rename your pet', value: 'rename' }, { name: 'Pet habitat strip', value: 'habitat' }, { name: 'Pet info', value: 'info' }))
+      .addStringOption(o => o.setName('species').setDescription('Which critter to adopt')
+        .addChoices(...PET_SPECIES.map(p => ({ name: `${p.emoji} ${p.name}`, value: p.id }))))
+      .addStringOption(o => o.setName('name').setDescription('Your pet\'s name').setMaxLength(20))
+      .addStringOption(o => o.setName('habitat').setDescription('Habitat strip theme')
+        .addChoices(...HABITAT_THEMES.map(h => ({ name: h.name, value: h.id })))))
+    .addSubcommand(s => s.setName('wall').setDescription('Your guestbook wall - list notes, or remove one (owner or mod)')
+      .addStringOption(o => o.setName('action').setDescription('What to do').setRequired(true)
+        .addChoices({ name: 'List notes', value: 'list' }, { name: 'Remove a note', value: 'remove' }))
+      .addIntegerOption(o => o.setName('note').setDescription('Note number to remove'))),
+  new SlashCommandBuilder().setName('moodpick').setDescription('Pick your swamp mood - sets your card aura and your pet\'s mood')
+    .addStringOption(o => o.setName('mood').setDescription('Your mood').setRequired(true)
+      .addChoices(...MOODS.map(m => ({ name: `${m.name} - ${m.blurb}`, value: m.id })), { name: 'Clear my mood', value: 'clear' })),
+  new SlashCommandBuilder().setName('rank').setDescription('Same card as /profile view - your level, XP and title')
     .addUserOption(o => o.setName('member').setDescription('Whose rank (default: you)')),
   new SlashCommandBuilder().setName('leaderboard').setDescription('Top 10 members of THE SWAMP by XP'),
   new SlashCommandBuilder().setName('bonus').setDescription('Show a member\'s current XP bonus breakdown')
