@@ -63,6 +63,12 @@ const config = {
   // The secret must match SWAMP_BUCKS_SECRET on the website, exactly.
   bucksApiBase: env('SWAMP_BUCKS_API_BASE').replace(/\/+$/, ''),
   bucksSecret: env('SWAMP_BUCKS_SECRET'),
+  // Swamp Bingo link (src/swampbingo.js): the shared secret the website
+  // sends on POST /swampbingo/win. Must match SWAMPBINGO_WEBHOOK_SECRET
+  // on the website, exactly. Empty = the win endpoint answers 503.
+  // The secret is NEVER written into store.json or printed anywhere.
+  swampBingoSecret: env('SWAMPBINGO_WEBHOOK_SECRET'),
+  swampBingoUrl: env('SWAMP_BINGO_URL'),
   levelRoleIds: parseLevelRoleIds(),
   factionRoleIds: parseFactionRoleIds(),
 };
@@ -87,6 +93,10 @@ function envSeedConfig() {
     artChannelId: envOrNull('ART_CHANNEL_ID'),
     levelRoleIds: parseLevelRoleIds(),
     factionRoleIds: parseFactionRoleIds(),
+    // Swamp Bingo play URL seed: the SWAMP_BINGO_URL env var fills the
+    // stored swampBingoUrl only while it is still blank; a /swampbingo
+    // start pick always wins over env afterwards.
+    swampBingoUrl: envOrNull('SWAMP_BINGO_URL'),
   };
 }
 

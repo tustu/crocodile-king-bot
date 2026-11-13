@@ -9,6 +9,7 @@ const {
   Client, GatewayIntentBits, Partials, Events, EmbedBuilder,
   PermissionFlagsBits, ActivityType, AttachmentBuilder, ChannelType,
   ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
+  ButtonBuilder, ButtonStyle,
   REST, Routes,
 } = require('discord.js');
 const { buildCommands } = require('./deploy-commands');
@@ -31,6 +32,7 @@ const profileLib = require('./profilecard');
 const petsLib = require('./pets');
 const bucksMod = require('./bucksbridge');
 const bucksBridge = bucksMod.bridge; // Swamp Bucks Bridge (off unless SWAMP_BUCKS_API_BASE + SWAMP_BUCKS_SECRET are set)
+const bingoMod = require('./swampbingo'); // Swamp Bingo link (role + win webhook + /swampbingo)
 
 const store = new Store();
 const tz = config.timezone;
@@ -53,6 +55,15 @@ applyEffectiveConfig();
 
 /* ---------------- health server (Hugging Face Spaces style) ---------------- */
 const health = http.createServer((req, res) => {
+  let pathname = req.url;
+  try { pathname = new URL(req.url, 'http://localhost').pathname; } catch { /* keep the raw url */ }
+  if (pathname === bingoMod.WEBHOOK_PATH) {
+    handleSwampBingoWin(req, res).catch((e) => {
+      console.error('[swampbingo] webhook error:', e);
+      try { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: false, reason: 'internal' })); } catch { /* socket gone */ }
+    });
+    return;
+  }
   if (req.url === '/' || req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, bot: 'Crocodile King', uptime: process.uptime() }));
@@ -65,6 +76,61 @@ const health = http.createServer((req, res) => {
   } else { res.writeHead(404); res.end('not found'); }
 });
 health.listen(config.port, () => console.log(`[health] listening on ${config.port}`));
+console.log(config.swampBingoSecret
+  ? '[swampbingo] win webhook armed at POST /swampbingo/win'
+  : '[swampbingo] win webhook OFF: SWAMPBINGO_WEBHOOK_SECRET is not set - wins cannot land until it is');
+
+/* ---------------- Swamp Bingo win webhook ----------------
+ * POST /swampbingo/win - Swampology.com calls this when a player
+ * wins. Shared-secret auth (SWAMPBINGO_WEBHOOK_SECRET). The handler
+ * never throws, never DMs anyone, and never answers a win twice for
+ * the same eventId (see src/swampbingo.js processWin). */
+const bingoDedupe = bingoMod.createWinDedupe();
+async function handleSwampBingoWin(req, res) {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' });
+    res.end(JSON.stringify({ ok: false, reason: 'method_not_allowed' }));
+    return;
+  }
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > bingoMod.MAX_BODY_BYTES) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, reason: 'payload_too_large' }));
+        return;
+      }
+      chunks.push(chunk);
+    }
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, reason: 'bad_payload' }));
+    return;
+  }
+  let body = null;
+  try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null'); }
+  catch { body = null; }
+  let guild = null;
+  if (client.isReady() && config.guildId) {
+    try { guild = await client.guilds.fetch(config.guildId); } catch { guild = null; }
+  }
+  const out = await bingoMod.processWin({
+    storeData: store.data,
+    save: () => store.save(),
+    guild,
+    secret: config.swampBingoSecret,
+    headers: req.headers,
+    body,
+    dedupe: bingoDedupe,
+  });
+  if (out.status === 200 && out.body && out.body.granted) {
+    console.log(`[swampbingo] win: granted Chomp & Daub to ${out.body.discordId} (announced: ${out.body.announced})`);
+  }
+  res.writeHead(out.status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(out.body));
+}
 
 /* ---------------- boot-time network probe (diagnostic) ----------------
  * Fire-and-forget: runs once shortly after startup to show, from inside
@@ -1435,6 +1501,84 @@ client.on(Events.InteractionCreate, async (interaction) => {
         '3. Come back here and run any command. The bridge spots the link and your balance follows you.',
         '',
         `The code lives for 15 minutes and works once. Your current balance of **${shopLib.balanceOf(rec)} Swamp Bucks** rides over with it, every last Buck. After linking, your Bucks in Discord and on Swampology are one and the same pile. Bucks stay play money: they cannot be bought, sold or cashed out, here or there.`,
+      ].join('\n'));
+    }
+
+    else if (cmd === 'swampbingo') {
+      const sub = interaction.options.getSubcommand();
+      const publicBase = process.env.RENDER_EXTERNAL_URL || 'https://crocodile-king.onrender.com';
+      if (sub === 'play') {
+        const url = bingoMod.getPlayUrl(store.getConfig());
+        if (!url) {
+          await interaction.reply('🐊 **Swamp Bingo opens on Swampology.com soon.** The hall doors are still being hung - the King will holler the moment the games are live. Wins on the site earn the **Chomp & Daub** role here, so get linked with **/link** while you wait.');
+          return;
+        }
+        const embed = new EmbedBuilder()
+          .setTitle('🐊 Swamp Bingo - the Bayou Bingo Hall')
+          .setColor(bingoMod.ROLE_COLOR)
+          .setDescription([
+            'Classic Bayou Bingo, Speed Swamp, Buzzword watch-party and the Live Watch Party with the Great Egret - all live on Swampology.com.',
+            '',
+            '🏆 **Winners earn the Chomp & Daub role** right here in THE SWAMP. Make sure your Discord is linked with **/link** first, or the King cannot find you to hand it over.',
+          ].join('\n'));
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel('Play Swamp Bingo').setStyle(ButtonStyle.Link).setURL(url),
+        );
+        await interaction.reply({ embeds: [embed], components: [row] });
+        return;
+      }
+      if (sub === 'status') {
+        if (!isMod) { await interaction.reply({ content: 'Swamp Bingo wiring is crown business: admins, Manage Server holders, or the configured mod role only.', ephemeral: true }); return; }
+        await interaction.reply({ content: bingoMod.statusText(store.getConfig(), { secretSet: !!config.swampBingoSecret, publicBase }), ephemeral: true });
+        return;
+      }
+      // sub === 'start' - admin-only setup
+      if (!isAdmin) { await interaction.reply({ content: 'Swamp Bingo setup is crown business: admins only.', ephemeral: true }); return; }
+      await interaction.deferReply();
+      const guild = interaction.guild;
+      const channelOpt = interaction.options.getChannel('channel');
+      const channelId = channelOpt ? channelOpt.id : interaction.channelId;
+      const urlOpt = interaction.options.getString('url');
+      const cfg = store.getConfig();
+      // Find the role, or create it (hot pink, to match the badge).
+      let role = null;
+      try { role = guild.roles.cache.find((r) => r && r.name === bingoMod.ROLE_NAME) || null; } catch { role = null; }
+      let roleCreated = false;
+      if (!role) {
+        try {
+          role = await guild.roles.create({
+            name: bingoMod.ROLE_NAME, color: bingoMod.ROLE_COLOR, hoist: true, mentionable: false,
+            reason: 'Crocodile King /swampbingo start - Swamp Bingo winners role',
+          });
+          roleCreated = true;
+        } catch (e) {
+          await interaction.editReply(`🐊 The King could not create the **${bingoMod.ROLE_NAME}** role: ${e.message}. He needs **Manage Roles**, and his own role must sit above the role he creates. Nothing was switched on.`);
+          return;
+        }
+      }
+      const playUrl = (urlOpt && urlOpt.trim()) || cfg.swampBingoUrl || bingoMod.DEFAULT_SWAMP_BINGO_URL;
+      store.setConfig({
+        swampBingoEnabled: true,
+        swampBingoRoleId: role.id,
+        swampBingoChannelId: channelId,
+        swampBingoUrl: playUrl,
+      });
+      applyEffectiveConfig();
+      store.save();
+      await interaction.editReply([
+        '🐊 **Swamp Bingo linking is ON.**',
+        `• **Role:** <@&${role.id}> ${roleCreated ? '(just created, hot pink)' : '(already there - plugged in)'}`,
+        `• **Win announcements:** <#${channelId}>`,
+        `• **Play link:** ${playUrl} - members open the games with **/swampbingo play**`,
+        '',
+        '**What Swampology.com calls when a player wins:**',
+        `POST ${publicBase}${bingoMod.WEBHOOK_PATH}`,
+        `Header: \`${bingoMod.SECRET_HEADER}: <the SWAMPBINGO_WEBHOOK_SECRET value in Render>\``,
+        'Body: `{"websiteUserId": "<Swampology profile id>", "pattern": "<win pattern>", "mode": "<game mode>"}` (discordId optional)',
+        'The King finds the linked Discord member, grants the role, and announces the win here. Unlinked winners get a clear `unlinked` answer so the site can point them at /link.',
+        ...(config.swampBingoSecret ? [] : ['', '⚠️ **One step left:** the webhook secret is NOT set on the bot yet - set **SWAMPBINGO_WEBHOOK_SECRET** in Render (same value on the website) or wins cannot land.']),
+        '',
+        'One human touch: in **Server Settings → Roles**, the **Crocodile King** role must sit *above* the Chomp & Daub role, or he cannot hand it out.',
       ].join('\n'));
     }
 

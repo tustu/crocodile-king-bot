@@ -69,6 +69,9 @@ function blankUser(userId) {
     pendingLinkCode: null,     // last /link code issued, while it can still be redeemed
     pendingLinkAt: 0,          // ms epoch the pending code was issued
     pendingKeys: [],           // sponsor prize keys held for this member, viewed with /prize (never DM'd)
+    // --- Swamp Bingo link (src/swampbingo.js) ---
+    bingoWins: 0,              // verified Swamp Bingo wins on Swampology.com
+    lastBingoWinAt: null,      // ms epoch of the last win
     // --- profile system (src/profilecard.js) ---
     profile: null,             // { bio, favColor, privacy, banner, bannerUrl, style, timezone, mood, showcase, pet, wall, habitat } - backfilled by ensureProfile
   };

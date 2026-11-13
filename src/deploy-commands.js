@@ -76,6 +76,15 @@ function buildCommands() {
     .addUserOption(o => o.setName('member').setDescription('Whose bonuses (default: you)')),
   new SlashCommandBuilder().setName('daily').setDescription('Claim your daily XP + Swamp Bucks and build your streak'),
   new SlashCommandBuilder().setName('link').setDescription('Link your Discord to your Swampology profile so your Swamp Bucks match on both'),
+  // NOTE: no builder-level admin gate on /swampbingo - start/status check
+  // Administrator / mod in the handler, because /swampbingo play is a
+  // MEMBER action (same shape as /event).
+  new SlashCommandBuilder().setName('swampbingo').setDescription('Swamp Bingo: play on Swampology.com, and link wins to the Chomp & Daub role')
+    .addSubcommand(s => s.setName('start').setDescription('Admin: switch Swamp Bingo linking on, create the Chomp & Daub role')
+      .addChannelOption(o => o.setName('channel').setDescription('Where win announcements go (default: this channel)'))
+      .addStringOption(o => o.setName('url').setDescription('Swamp Bingo page URL (default: swampology.com/swamp-bingo)')))
+    .addSubcommand(s => s.setName('play').setDescription('Bring up Swamp Bingo to play on Swampology.com'))
+    .addSubcommand(s => s.setName('status').setDescription('Mods: is Swamp Bingo linking on, and what is it wired to?')),
   new SlashCommandBuilder().setName('prize').setDescription('See prize keys waiting for you - the reply shows only to you'),
   new SlashCommandBuilder().setName('quest').setDescription('Daily quest of THE SWAMP')
     .addSubcommand(s => s.setName('show').setDescription('Show today\'s quest and your progress'))

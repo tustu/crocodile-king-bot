@@ -36,6 +36,11 @@ function blankHomeConfig() {
     artChannelId: null,       // OPTIONAL: Swamp Art channel (posts there count toward the art quest)
     levelRoleIds: {},         // OPTIONAL: { level: roleId } ladder roles
     factionRoleIds: {},       // OPTIONAL: { factionId: roleId }
+    // --- Swamp Bingo link (src/swampbingo.js) ---
+    swampBingoEnabled: false, // /swampbingo start switches this on
+    swampBingoRoleId: null,   // the Chomp & Daub role, created by /swampbingo start
+    swampBingoChannelId: null,// where win announcements go
+    swampBingoUrl: null,      // Swamp Bingo page on Swampology.com (null = coming soon, no dead link)
   };
 }
 const CONFIG_KEYS = Object.keys(blankHomeConfig());
