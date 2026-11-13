@@ -191,8 +191,8 @@ test('zero-config: summary + missing list work on a blank config', () => {
 });
 
 /* ---------- registration shape ---------- */
-test('/setup is registered (27 top-level commands) with panel/show/create/reset', () => {
-  assert.equal(commands.length, 27); // 26 + /moodpick (profile system)
+test('/setup is registered (28 top-level commands) with panel/show/create/reset', () => {
+  assert.equal(commands.length, 28); // 27 + /swampbingo (start/play/status)
   const setupCmd = commands.find(c => c.name === 'setup');
   assert.ok(setupCmd, 'setup command exists');
   const subs = setupCmd.options.map(o => o.name).sort();

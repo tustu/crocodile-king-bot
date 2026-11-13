@@ -6,9 +6,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildCommands, commands } = require('../src/deploy-commands');
 
-test('buildCommands returns 25 valid command JSONs', () => {
+test('buildCommands returns 28 valid command JSONs', () => {
   const body = buildCommands();
-  assert.equal(body.length, 27); // 26 + /moodpick (profile system)
+  assert.equal(body.length, 28); // 27 + /swampbingo (start/play/status)
   for (const c of body) {
     assert.equal(typeof c.name, 'string');
     assert.match(c.name, /^[a-z0-9_-]{1,32}$/);
