@@ -12,11 +12,11 @@
   "main": "src/index.js",
   "name": "swamp-host-bot-crocodile-king",
   "scripts": {
-    "check": "node --check src/index.js && node --check src/xp.js && node --check src/store.js && node --check src/lines.js && node --check src/content.js && node --check src/config.js && node --check src/legal.js && node --check src/factions.js && node --check src/loot.js && node --check src/titles.js && node --check src/questgen.js && node --check src/shop.js && node --check src/avatarframe.js && node --check src/backgrounds.js && node --check src/storefront.js && node --check src/setup.js && node --check src/deploy-commands.js && node --check src/bucksbridge.js && node --check src/profilecard.js && node --check src/pets.js",
+    "check": "node --check src/index.js && node --check src/xp.js && node --check src/store.js && node --check src/lines.js && node --check src/content.js && node --check src/config.js && node --check src/legal.js && node --check src/factions.js && node --check src/loot.js && node --check src/titles.js && node --check src/questgen.js && node --check src/shop.js && node --check src/avatarframe.js && node --check src/backgrounds.js && node --check src/storefront.js && node --check src/setup.js && node --check src/deploy-commands.js && node --check src/bucksbridge.js && node --check src/profilecard.js && node --check src/pets.js && node --check src/swampbingo.js",
     "deploy-commands": "node src/deploy-commands.js",
     "start": "node src/index.js",
     "test": "node --test test/*.test.js"
   },
   "type": "commonjs",
-  "version": "2.3.1"
+  "version": "2.4.0"
 }
