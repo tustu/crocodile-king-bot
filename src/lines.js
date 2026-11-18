@@ -16,11 +16,9 @@ function line(stage, vars = {}, seed) {
 const LINES = {
   // No 'welcome' stage: the join greeting was cut 2026-11-18 by the
   // owner - joins get the full WELCOME_POST only (src/content.js).
-  reminder30: [
-    "{member}, you are still standin' at the gate with wet feet. 30 minutes in and no verification. Even a king loses patience. Get it done: {verify}, or you keep missin' drops, quests and your +25% verified XP bonus.",
-    "Hey {member}. Straight talk from the throne: unverified folks get the bench, verified folks get the swamp. {verify}. Takes a minute. The King checked.",
-    "{member}, the gators are circlin' and you are still unverified. I should know, I sent them. Stamp that pass: {verify}, and come get your Welcome Pack before someone else eats it.",
-  ],
+  // No 'reminder30' stage: the 30-min member reminder was cut the same
+  // day - it posted into the welcome channel, which carries ONLY the
+  // WELCOME_POST now. The 2h/24h mod nudges below are mod-channel only.
   modNudge2h: [
     "Mods. {name} has been unverified for 2 hours. Somebody stamp their swamp pass before they turn into a lurker statue in my kingdom.",
     "Heads up, mods: {name} joined 2 hours ago and is still at the gate. Quick verify and they are in. Do not leave them to the mosquitoes. The King does not like waitin'.",
@@ -31,11 +29,9 @@ const LINES = {
     "24 hours, mods. {name} remains at the gate. The King has reminded, nudged, and now he is showin' teeth.",
     "Last call on {name}. Unverified for a full day. One of you stamp it today. The throne thanks you. The teeth do not.",
   ],
-  verified: [
-    "Stamped and swamp legal, {member}. Welcome to the family proper. Your +25% verified XP bonus is live, your Welcome Pack is below, now go make some noise in the King's swamp.",
-    "That is the spirit, {member}. Verified. The whole swamp just unlocked for you. XP bonus on, quests open, gators friendly-ish. Even the King.",
-    "{member} is verified and officially one of ours. Go say hi, grab /daily, and do not let the Tadpoles out-level you. The King is watchin' the board.",
-  ],
+  // No 'verified' stage: the verified announcement was cut 2026-11-18 -
+  // the Welcome Pack still lands silently, but nothing posts in the
+  // welcome channel except the WELCOME_POST.
   levelUp: [
     "{member} just hit Level {level}: {title}! The swamp notices. +{bucks} Swamp Bucks in your pocket. Keep sloshin'. The King approves.",
     "LEVEL UP: {member} is now Level {level} ({title}). +{bucks} Swamp Bucks. Smile wide. Even the throne tipped its crown.",

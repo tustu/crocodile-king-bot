@@ -605,18 +605,20 @@ async function markVerified(member) {
   rec.verified = true;
   rec.verifiedAt = Date.now();
   store.save();
-  await awardXp(member.id, 50, { member, channelId: config.welcomeChannelId }); // Welcome Pack XP
+  // Welcome Pack awards land silently - NO announcement in the welcome
+  // channel (owner's order 2026-11-18: the welcome channel carries ONLY
+  // the WELCOME_POST). No channelId is passed to awardXp either, so a
+  // level-up from the pack can never fall back to the welcome channel.
+  await awardXp(member.id, 50, { member }); // Welcome Pack XP
   await bucksBridge.adjust(rec, 25, 'welcome pack');
   lootLib.addItem(rec, lootLib.RAID_PASS, 1); // Welcome Pack now also carries 1 Raid Pass
   store.save();
-  const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
-  if (ch && ch.isTextBased()) {
-    await ch.send(line('verified', { member: `<@${member.id}>` }, Date.now()) +
-      '\n🎁 **Welcome Pack:** +50 XP, +25 Swamp Bucks and **1 Raid Pass** (spend it with /raid to summon an event). Run /daily every day to build your streak.').catch(() => {});
-  }
 }
 
-/** Scheduler: 30 min member reminder, 2h private mod nudge, 24h mod re-nudge. Mod stages are mod-channel only. */
+/** Scheduler: 2h private mod nudge, 24h mod re-nudge. Mod stages are mod-channel only.
+ * The old 30-min member reminder posted into the welcome channel; the
+ * owner cut it 2026-11-18 (welcome channel carries ONLY the WELCOME_POST).
+ * Stage 1 still advances silently at 30 min so the 2h mod nudge fires on time. */
 async function unverifiedSweep() {
   if (!config.guildId) return;
   let guild;
@@ -631,10 +633,9 @@ async function unverifiedSweep() {
     if (isVerifiedMember(member)) { await markVerified(member); continue; }
     const ageMs = now - rec.joinedAt;
     if (ageMs >= 30 * 60 * 1000 && rec.reminderStage < 1) {
+      // Silent: no message anywhere. The 30-min reminder used to post
+      // into the welcome channel; cut 2026-11-18 by the owner.
       rec.reminderStage = 1; changed = true;
-      const ch = await fetchChannel(config.welcomeChannelId, 'WELCOME_CHANNEL_ID');
-      const verifyText = config.verifyChannelId ? `head to <#${config.verifyChannelId}> and follow the pinned steps` : config.verifyInstructions;
-      if (ch && ch.isTextBased()) await ch.send(line('reminder30', { member: `<@${rec.userId}>`, verify: verifyText }, now)).catch(() => {});
     } else if (ageMs >= 2 * 60 * 60 * 1000 && rec.reminderStage < 2) {
       rec.reminderStage = 2; changed = true;
       await modNudge('modNudge2h', rec, guild);
