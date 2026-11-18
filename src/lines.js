@@ -14,11 +14,8 @@ function line(stage, vars = {}, seed) {
 }
 
 const LINES = {
-  welcome: [
-    "Well look what the river dragged in. Welcome to THE SWAMP, {member}. Smile wide. The swamp is watching. You are in the mud now, but you are not family till you are verified: {verify}. One minute, no bite, King's word.",
-    "{member} just climbed up on my dock. Welcome to THE SWAMP. I am the Crocodile King, and I did not come to splash. I came to rule. First order from the throne: get verified: {verify}. Do that and the good channels, the drops and your XP bonus all unlock.",
-    "New feet on the boardwalk. Welcome, {member}. The King sees every new face in his swamp. Get yourself verified: {verify}, and we will get you fed, levelled and paid in Swamp Bucks.",
-  ],
+  // No 'welcome' stage: the join greeting was cut 2026-11-18 by the
+  // owner - joins get the full WELCOME_POST only (src/content.js).
   reminder30: [
     "{member}, you are still standin' at the gate with wet feet. 30 minutes in and no verification. Even a king loses patience. Get it done: {verify}, or you keep missin' drops, quests and your +25% verified XP bonus.",
     "Hey {member}. Straight talk from the throne: unverified folks get the bench, verified folks get the swamp. {verify}. Takes a minute. The King checked.",
